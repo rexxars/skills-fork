@@ -104,9 +104,7 @@ await installSkills(source, {
   requested name that matches several different skills (for example
   `foo-bar` matching `Foo Bar` and `foo_bar`) always throws
   `SKILLS_AMBIGUOUS_SKILL_SELECTOR`.
-- **Cancellation.** `signal` is checked between steps (a running clone is not
-  interrupted); an aborted call rejects with `signal.reason`, usually an
-  `AbortError`.
+- **Cancellation.** `signal` cancels Git cloning and GitHub repository metadata requests. Other work checks the signal between steps. An aborted call rejects with `signal.reason`, usually an `AbortError`.
 
 ## Configuration
 

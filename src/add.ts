@@ -1598,6 +1598,7 @@ async function resolveSkills(
     fullDepth?: boolean;
     requestedSkills?: string[];
     includeDuplicateNames?: boolean;
+    signal?: AbortSignal;
   },
   spinner: Spinner
 ): Promise<ResolvedSkills> {
@@ -1672,7 +1673,7 @@ async function resolveSkills(
         } else {
           spinner.start('Cloning repository…');
         }
-        tempDir = await cloneRepo(parsed.url, parsed.ref);
+        tempDir = await cloneRepo(parsed.url, parsed.ref, options.signal);
         spinner.stop('Repository cloned');
 
         spinner.start('Discovering skills…');
@@ -1681,7 +1682,7 @@ async function resolveSkills(
     } else {
       // GitLab, git URL, or --full-depth: always clone
       spinner.start('Cloning repository…');
-      tempDir = await cloneRepo(parsed.url, parsed.ref);
+      tempDir = await cloneRepo(parsed.url, parsed.ref, options.signal);
       spinner.stop('Repository cloned');
 
       spinner.start('Discovering skills…');
@@ -1882,6 +1883,7 @@ export interface SourceRequest {
   includeInternal?: boolean;
   /** Keep skills that share a name instead of dropping all but the first. */
   includeDuplicateNames?: boolean;
+  signal?: AbortSignal;
 }
 
 /** A source after its network phase; `resolved` owns a temp dir until it is installed. */
@@ -1909,6 +1911,7 @@ export async function fetchSource({
   fullDepth,
   includeInternal = skills.length > 0,
   includeDuplicateNames,
+  signal,
 }: SourceRequest): Promise<FetchedSource> {
   try {
     // Arbitrary URLs: prefer the well-known endpoint, else a direct download.
@@ -1917,7 +1920,7 @@ export async function fetchSource({
         (await resolveWellKnownSkills(parsed.url, includeInternal))) ||
       (await resolveSkills(
         parsed,
-        { includeInternal, fullDepth, requestedSkills: skills, includeDuplicateNames },
+        { includeInternal, fullDepth, requestedSkills: skills, includeDuplicateNames, signal },
         silentSpinner
       ));
     return { parsed, resolved };

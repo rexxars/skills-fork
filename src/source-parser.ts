@@ -86,9 +86,9 @@ const GITHUB_FULL_NAME = /^[A-Za-z0-9-]+\/(?!\.\.?$)[A-Za-z0-9._-]+$/;
  * GitHub follows renames and transfers. Returns null when the repo does not
  * exist, is not visible anonymously, or the API is unreachable.
  */
-export async function fetchGitHubRepoInfo(owner: string, repo: string) {
+export async function fetchGitHubRepoInfo(owner: string, repo: string, signal?: AbortSignal) {
   try {
-    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`);
+    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { signal });
     if (!res.ok) {
       return null;
     }
@@ -130,11 +130,11 @@ export function withCanonicalGitHubRepo(
 }
 
 /** The GitHub API lookup for a `github` source, or null for any other source. */
-export function lookupGitHubRepo(parsed: ParsedSource) {
+export function lookupGitHubRepo(parsed: ParsedSource, signal?: AbortSignal) {
   if (parsed.type !== 'github') return Promise.resolve(null);
   const ownerRepo = parseOwnerRepo(getOwnerRepo(parsed) ?? '');
   if (!ownerRepo) return Promise.resolve(null);
-  return fetchGitHubRepoInfo(ownerRepo.owner, ownerRepo.repo);
+  return fetchGitHubRepoInfo(ownerRepo.owner, ownerRepo.repo, signal);
 }
 
 /**

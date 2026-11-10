@@ -72,34 +72,44 @@ export async function openSource(
   const skills =
     requested.length > 0 ? [...requested] : parsed.skillFilter ? [parsed.skillFilter] : [];
   options.onProgress?.({ type: 'resolve:start', source: input });
-  const repoInfo = lookupGitHubRepo(parsed);
-  const fetched = await fetchSource({
-    parsed,
-    skills,
-    fullDepth: config.fullDepth,
-    includeInternal: config.includeInternal || skills.length > 0,
-    // Kept so duplicates can be reported; only the first of each name is installed.
-    includeDuplicateNames: true,
-  });
-  if (!fetched.resolved) throw fetchError(input, fetched);
-  // Report a renamed GitHub repo under its current name.
-  fetched.parsed = withCanonicalGitHubRepo(parsed, (await repoInfo)?.fullName);
+  // Stop the parallel metadata request if source fetching fails before it finishes.
+  const controller = new AbortController();
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, controller.signal])
+    : controller.signal;
+  const repoInfo = lookupGitHubRepo(parsed, signal);
+  let fetched: FetchedSource | undefined;
+  try {
+    fetched = await fetchSource({
+      parsed,
+      skills,
+      fullDepth: config.fullDepth,
+      includeInternal: config.includeInternal || skills.length > 0,
+      // Kept so duplicates can be reported; only the first of each name is installed.
+      includeDuplicateNames: true,
+      signal,
+    });
+    signal.throwIfAborted();
+    if (!fetched.resolved) throw fetchError(input, fetched);
+    // Report a renamed GitHub repo under its current name.
+    fetched.parsed = withCanonicalGitHubRepo(parsed, (await repoInfo)?.fullName);
+    signal.throwIfAborted();
 
-  const handle = await createSkillSource(input, fetched);
-  if (options.signal?.aborted) {
-    await handle.dispose();
-    options.signal?.throwIfAborted();
+    const handle = await createSkillSource(input, fetched, signal);
+    signal.throwIfAborted();
+    if (handle.skills.length === 0) throw diagnostics.SKILLS_NO_VALID_SKILLS();
+    options.onProgress?.({
+      type: 'resolve:done',
+      source: handle.source,
+      skills: handle.skills.length,
+    });
+    return handle;
+  } catch (error) {
+    if (fetched) await releaseSource(fetched);
+    throw error;
+  } finally {
+    controller.abort();
   }
-  if (handle.skills.length === 0) {
-    await handle.dispose();
-    throw diagnostics.SKILLS_NO_VALID_SKILLS();
-  }
-  options.onProgress?.({
-    type: 'resolve:done',
-    source: handle.source,
-    skills: handle.skills.length,
-  });
-  return handle;
 }
 
 /** Apply a `ref` option, which only git sources accept. */
@@ -134,7 +144,11 @@ function fetchError(input: string, fetched: FetchedSource): Error {
   });
 }
 
-async function createSkillSource(input: string, raw: FetchedSource): Promise<SkillSource> {
+async function createSkillSource(
+  input: string,
+  raw: FetchedSource,
+  signal?: AbortSignal
+): Promise<SkillSource> {
   const { fetched, duplicates } = dedupeSkills(raw);
   const skills: SkillInfo[] = fetched.resolved!.skills.map((skill) => {
     const path = skillPath(fetched, skill);
@@ -152,7 +166,7 @@ async function createSkillSource(input: string, raw: FetchedSource): Promise<Ski
   const { resolved, parsed } = fetched;
   const commit =
     GIT_SOURCE_TYPES.has(parsed.type) && resolved!.tempDir && !resolved!.blobResult
-      ? ((await getHeadCommit(resolved!.tempDir)) ?? undefined)
+      ? ((await getHeadCommit(resolved!.tempDir, signal)) ?? undefined)
       : undefined;
 
   const state: SourceState = { fetched, disposed: false };

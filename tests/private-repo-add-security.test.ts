@@ -168,7 +168,7 @@ describe('private repository installs', () => {
       mode: 'copy',
     });
 
-    expect(cloneRepo).toHaveBeenCalledWith(source, undefined);
+    expect(cloneRepo).toHaveBeenCalledWith(source, undefined, undefined);
     await expect(
       readFile(join(project, '.agents', 'skills', 'private-skill', 'SKILL.md'), 'utf-8')
     ).resolves.toContain('private-skill');

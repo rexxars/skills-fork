@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { rmSync } from 'fs';
+import { existsSync, rmSync } from 'fs';
 
 const simpleGitMock = vi.hoisted(() => vi.fn());
 const execFileMock = vi.hoisted(() => vi.fn());
@@ -210,6 +210,74 @@ describe('git clone fallbacks', () => {
       'Warning: failed to initialize Git submodules; installed skills may be incomplete.'
     );
   });
+
+  it.each(['clone', 'submodules', 'SHA fetch', 'gh auth', 'gh clone', 'SSH clone'])(
+    'preserves cancellation during %s and removes the temporary clone',
+    async (stage) => {
+      const controller = new AbortController();
+      const reason = new Error(`Cancel ${stage}`);
+      const abort = async () => {
+        controller.abort(reason);
+        throw new Error('fatal: Authentication failed');
+      };
+      let cloneDir: string | undefined;
+      const primary = createGitClientMock(
+        vi.fn(async (_url: string, dir: string) => {
+          cloneDir = dir;
+          if (stage === 'clone') await abort();
+          if (stage === 'SHA fetch') {
+            throw new Error(`fatal: Remote branch ${FULL_SHA} not found in upstream origin`);
+          }
+          if (stage.startsWith('gh ') || stage === 'SSH clone') {
+            throw new Error('fatal: Authentication failed');
+          }
+        })
+      );
+      const fallback = createGitClientMock(vi.fn().mockResolvedValue(undefined));
+      if (stage === 'submodules') fallback.submoduleUpdate.mockImplementation(abort);
+      if (stage === 'SSH clone') fallback.clone.mockImplementation(abort);
+      simpleGitMock.mockReturnValue(fallback).mockReturnValueOnce(primary);
+      if (stage === 'SHA fetch') {
+        simpleGitMock.mockReturnValueOnce(createShaClientMock({ fetch: vi.fn(abort) }));
+      }
+
+      execFileMock.mockImplementation(
+        (
+          _file: string,
+          args: string[],
+          _options: unknown,
+          callback: (...args: unknown[]) => void
+        ) => {
+          if (
+            (stage === 'gh auth' && args[0] === 'auth') ||
+            (stage === 'gh clone' && args[0] === 'repo')
+          ) {
+            controller.abort(reason);
+            callback(new Error('The operation was aborted'), '', '');
+          } else if (stage === 'SSH clone') {
+            callback(new Error('gh auth unavailable'), '', '');
+          } else {
+            callback(null, '', '');
+          }
+        }
+      );
+      const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        await expect(
+          cloneRepo(
+            'https://github.com/acme/skills.git',
+            stage === 'SHA fetch' ? FULL_SHA : undefined,
+            controller.signal
+          )
+        ).rejects.toBe(reason);
+        if (!cloneDir) throw new Error('Clone did not start');
+        expect(existsSync(cloneDir)).toBe(false);
+      } finally {
+        warning.mockRestore();
+        if (cloneDir) rmSync(cloneDir, { recursive: true, force: true });
+      }
+    }
+  );
 
   it('falls back to gh repo clone for GitHub HTTPS auth failures', async () => {
     const primaryClone = vi

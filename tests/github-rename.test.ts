@@ -108,7 +108,9 @@ describe('fetchGitHubRepoInfo', () => {
       );
     vi.stubGlobal('fetch', fetchMock);
     await expect(fetchGitHubRepoInfo('old-owner', 'old-repo')).resolves.toEqual(renamed);
-    expect(fetchMock).toHaveBeenCalledWith('https://api.github.com/repos/old-owner/old-repo');
+    expect(fetchMock).toHaveBeenCalledWith('https://api.github.com/repos/old-owner/old-repo', {
+      signal: undefined,
+    });
   });
 
   it('returns null when the repo is not visible', async () => {
